@@ -1,5 +1,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +9,7 @@
 #include <string>
 using namespace std;
 
-#define PORT 3000
+#define PORT 3001
 #define BACKLOG 5
 
 extern int errno;
@@ -27,7 +28,9 @@ int main () {
     }
 
     // Setup socket address info
-    struct sockaddr_in server_addr;
+    struct sockaddr_in server_addr, client_addr;
+    memset((char *)&server_addr, 0, sizeof(server_addr));
+
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
@@ -47,15 +50,16 @@ int main () {
         /*Extract the first connection on the queue of pending connections, create a new socket 
         with the same socket type protocol and address family as the specified socket, and allocate 
         a new file descriptor for that socket.*/
-        if ((client_fd = accept(server_fd, (struct sockaddr*)&server_addr, (socklen_t*)&server_addr)) < 0) {
+        if ((client_fd = accept(server_fd, (struct sockaddr*)&client_addr, (socklen_t*)&server_addr)) < 0) {
             showError("failed to extract connection");
         }
+        printf("server: got connection from %s\n", inet_ntoa(client_addr.sin_addr));
         int data_len = read(client_fd, buffer, 2048);
         if (data_len < 0) {
             showError("failed to read from socket");
         }
-        // if (data_len > 0)
-        //    printf("%s\n",buffer );
+        if (data_len > 0)
+           printf("%s\n", buffer);
     }
 
 }
