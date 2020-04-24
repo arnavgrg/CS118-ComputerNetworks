@@ -32,12 +32,12 @@ string TXT =    "Content-Type: text/plain\r\n";
 string BINARY = "Content-Type: application/octet-stream\r\n";
 
 // Response headers
-string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "Content-length: 307\r\n" 
-                        + "\r\n" + "<!doctype HTML>\n<html>\n<head><title> 404: File Not Found\
+string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "\r\n" +
+                        "<!doctype HTML>\n<html>\n<head><title> 404: File Not Found\
                         </title></head>\n\n<body><h1> 404 File NOT Found.</h1><p> The requested\
                         file could not be found. Please try again.</p></body>\n</html>\n";
 string OK_STATUS = "HTTP/1.1 200 OK\r\n";
-string CLOSED_CONNECTION = "Connection: Closed\r\n";
+string CLOSED_CONNECTION = "Connection: close\r\n";
 string SERVER_NAME = "Server: Arnav/1.0\r\n";
 
 // Return error message after setting errno
@@ -99,11 +99,11 @@ string parseFileType(string fileName) {
 
 // Parse client's request, and serve response from server to client
 void parseRequest(int client_fd) {
-    char buffer[2048] = {0};
-    memset(buffer, 0, 2048);
+    char buffer[8192] = {0};
+    memset(buffer, 0, 8192);
 
     // Read data from client into buffer
-    int data_len = read(client_fd, buffer, 2048);
+    int data_len = read(client_fd, buffer, 8192);
     if (data_len < 0) {
         showError("failed to read from client");
     }
@@ -119,12 +119,12 @@ void parseRequest(int client_fd) {
 
     // Get file descriptor for requested file if it exists and 
     // Check for valid file descriptor
-    struct stat fileStat;
+    struct stat fileinfo;
     int file_fd = open(file_name.c_str(), O_RDONLY);
     if (file_fd < 0) {
         page404(client_fd);
         return;
-    } if (fstat(file_fd, &fileStat) < 0) {
+    } if (fstat(file_fd, &fileinfo) < 0) {
         showError("bad file");
         return;
     }
@@ -146,11 +146,29 @@ void parseRequest(int client_fd) {
         return;
     }
 
-    // Check for valid file type and create Content-Type response header
-    string contentHeader = parseFileType(file_name);
+    // Create headers for response status, server name, content-type,
+    string responseStatus = OK_STATUS;
+    string server = SERVER_NAME;
+    string closeConnection = CLOSED_CONNECTION;
+    string contentType = parseFileType(file_name);
 
+    // header for content-length
+    char len[100]; 
+    long long fileLength = fileinfo.st_size;
+    sprintf(len, "Content-Length: %lld\r\n", fileLength);
+    string contentLen(len);
+
+    // Build complete response body
+    string response = responseStatus + server + closeConnection 
+                        + contentType + contentLen + "\r\n";
+
+    // Write response back to client
+    write(client_fd, response.c_str(), response.length());
+    write(client_fd, fileBuf, fileLength);
+
+    // Close connection with client and free memory
     close(client_fd);
-    return;
+    delete[] fileBuf;
 }
 
 int main () {
