@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <fstream>
+#include <time.h>
 using namespace std;
 
 extern int errno;
