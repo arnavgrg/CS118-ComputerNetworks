@@ -9,6 +9,9 @@
 #include <iostream>
 #include <string>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 using namespace std;
 
 extern int errno;
@@ -26,7 +29,7 @@ string PNG =    "Content-Type: image/png\r\n";
 string TXT =    "Content-Type: text/plain\r\n";
 string BINARY = "Content-Type: application/octet-stream\r\n";
 
-string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "Content-length: 327\r\n" 
+string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "Content-length: 307\r\n" 
                         + "\r\n" + "<!doctype HTML>\n<html>\n<head><title> 404: File Not Found\
                         </title></head>\n\n<body><h1> 404 File NOT Found.</h1><p> The requested\
                         file could not be found. Please try again.</p></body>\n</html>\n";
@@ -35,6 +38,11 @@ string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "Content-length: 3
 void showError(string s) {
     perror(s.c_str());
     exit(1);
+}
+
+// Send simple 404 page html as server response
+void page404(int fd) {
+    write(fd, PAGE_NOT_FOUND.c_str(), PAGE_NOT_FOUND.length());
 }
 
 // handler for sigaction 
@@ -47,7 +55,7 @@ void sighandler(int s) {
 // Extract file name from input buffer
 string parseFileName(char* buffer) {
     const char slash = '/';
-    
+
     char* pos = strchr(buffer, slash);
     int buf_len = strlen(pos);
 
@@ -61,22 +69,42 @@ string parseFileName(char* buffer) {
     return name;
 }
 
+// Parse client's request, and serve response from server to client
 void parseRequest(int client_fd) {
     char buffer[2048];
     memset(buffer, 0, 2048);
 
+    // Read data from client into buffer
     int data_len = read(client_fd, buffer, 2048);
     if (data_len < 0) {
         showError("failed to read from client");
     }
     printf("> client request: \n%s\n", buffer);
 
+    // Parse request to retrieve file name
     string file_name = parseFileName(buffer);
     if (file_name == "") {
-        write(client_fd, PAGE_NOT_FOUND.c_str(), PAGE_NOT_FOUND.length());
+        page404(client_fd);
         return;
-    } else {
-        printf("> file name requested: %s\n\n", file_name.c_str());
+    } 
+    printf("> file name requested: %s\n\n", file_name.c_str());
+    
+    // If needed, change %20 to white spaces in file's name 
+    for (string::size_type i = 0; (i = file_name.find("%20", i)) != string::npos; ) {
+        file_name.replace(i, 3, " ");
+        i += 1;
+    }
+
+    // Get file descriptor for requested file if it exists and 
+    // Check for valid file descriptor
+    struct stat fileStat;
+    int file_fd = open(file_name.c_str(), O_RDONLY);
+    if (file_fd < 0) {
+        page404(client_fd);
+        return;
+    } if (fstat(file_fd, &fileStat) < 0) {
+        showError("bad file");
+        return;
     }
 
     close(client_fd);
