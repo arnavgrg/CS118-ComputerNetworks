@@ -1,16 +1,38 @@
-Name: Arnav Garg
+Name:  Arnav Garg
 Email: arnavgrg@ucla.edu
-UID: 304911796
+UID:   304911796
 
 Server Design Description:
-
+The server sets up a socket, binds it to port 3000 on the host machine, 
+and listens for connection requests. Upon receiving a request, it accepts 
+it, reads the GET request, and parses the request body to find the path 
+specified (/<filename>). From here, the server checks if the file exists,
+opens it and reads data from the file if it does exist, and finally, builds
+a response body with the response status, server name, content-length, 
+and content-type headers, and sends the data requested back in the body of
+the response. It also sends the connection header and closes the connection
+with the client after a request is made. If the requested file is not found, 
+or if a query is made to the base path ('/'), it returns a 404 error, otherwise
+it always returns a 200 status code. The server is able to log the IP of the 
+client, the entire client request and the file name requested. It also logs 
+the response headers.
 
 Problems:
-1.
-2.
-3.
+1. Segmentation faults: I believe this only happens when the keep-alive 
+    connection is sent without specifying an endpoint (that is, not even to '/'). 
+    Very rare, but never actually happens when GET requests are sent (only 
+    sometimes when the server is idle)
+2. Reading from files: It took quite a bit of experimentation to get 
+    this part right. I was finally able to use ifstreams to do it, and used 
+    item 3 specified under the Additional Libraries section to make it work.
+3.  Binary file: In the case of non .html files, I kept running into an issue
+    where images wouldn't display and the binary file wouldn't download (Chrome
+    says "file incomplete error"). The only way to solve this was to split my
+    write messages into 2 - one to send the headers, and the other to send 
+    the data read in from the file. As soon as I did this, everything started
+    to work correctly. 
 
 List of Additional Libraries/Resources:
 1. TA's Slides
 2. https://www.geeksforgeeks.org/socket-programming-cc/
-2. http://www.cplusplus.com/reference/istream/istream/tellg/
+3. http://www.cplusplus.com/reference/istream/istream/tellg/

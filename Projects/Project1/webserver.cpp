@@ -161,6 +161,7 @@ void parseRequest(int client_fd) {
     // Build complete response body
     string response = responseStatus + server + closeConnection 
                         + contentType + contentLen + "\r\n";
+    printf("Server response: %s\n\n", response.c_str());
 
     // Write response back to client
     write(client_fd, response.c_str(), response.length());

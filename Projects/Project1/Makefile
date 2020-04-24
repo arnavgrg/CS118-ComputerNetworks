@@ -9,4 +9,4 @@ dist:
 clean:
 	rm -rf server
 	# rm -rf server.dSYM
-	rm $(UID).tar.gaz
+	# rm $(UID).tar.gaz
