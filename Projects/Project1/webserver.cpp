@@ -12,11 +12,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <fstream>
 using namespace std;
 
 extern int errno;
 
-#define PORT 3001
+#define PORT 3000
 #define BACKLOG 5
 
 // Global server variable to gracefully handler ctrl-c to terminate server
@@ -29,10 +30,14 @@ string PNG =    "Content-Type: image/png\r\n";
 string TXT =    "Content-Type: text/plain\r\n";
 string BINARY = "Content-Type: application/octet-stream\r\n";
 
+// Response headers
 string PAGE_NOT_FOUND = "HTTP/1.1 404 Not Found\r\n" + HTML + "Content-length: 307\r\n" 
                         + "\r\n" + "<!doctype HTML>\n<html>\n<head><title> 404: File Not Found\
                         </title></head>\n\n<body><h1> 404 File NOT Found.</h1><p> The requested\
                         file could not be found. Please try again.</p></body>\n</html>\n";
+string OK_STATUS = "HTTP/1.1 200 OK\r\n";
+string CLOSED_CONNECTION = "Connection: Closed\r\n";
+string SERVER_NAME = "Server: Arnav/1.0\r\n";
 
 // Return error message after setting errno
 void showError(string s) {
@@ -69,9 +74,31 @@ string parseFileName(char* buffer) {
     return name;
 }
 
+// Find file type and return 
+string parseFileType(string fileName) {
+    string extensions[4] = {".html", ".txt", ".jpg", ".png"};
+    size_t found;
+
+    for (int i = 0; i < 4; i++) {
+        found = fileName.find(extensions[i]);
+        if (found != string::npos) {
+            if (i == 0)
+                return HTML;
+            else if (i == 1)
+                return TXT;
+            else if (i == 2)
+                return JPG;
+            else
+                return PNG;
+        }
+    }
+
+    return BINARY;
+}
+
 // Parse client's request, and serve response from server to client
 void parseRequest(int client_fd) {
-    char buffer[2048];
+    char buffer[2048] = {0};
     memset(buffer, 0, 2048);
 
     // Read data from client into buffer
@@ -88,12 +115,6 @@ void parseRequest(int client_fd) {
         return;
     } 
     printf("> file name requested: %s\n\n", file_name.c_str());
-    
-    // If needed, change %20 to white spaces in file's name 
-    for (string::size_type i = 0; (i = file_name.find("%20", i)) != string::npos; ) {
-        file_name.replace(i, 3, " ");
-        i += 1;
-    }
 
     // Get file descriptor for requested file if it exists and 
     // Check for valid file descriptor
@@ -106,6 +127,26 @@ void parseRequest(int client_fd) {
         showError("bad file");
         return;
     }
+    close(file_fd);
+
+    // Read data from file and store it in a buffer
+    ifstream requestedFile;
+    char* fileBuf;
+    requestedFile.open(file_name.c_str(), ios::in);
+    if (requestedFile.is_open()){
+        requestedFile.seekg(0, requestedFile.end);
+        int length = requestedFile.tellg();
+        requestedFile.seekg(0, requestedFile.beg);
+        fileBuf = new char[length];
+        requestedFile.read(fileBuf, length);
+        requestedFile.close();
+    } else {
+        showError("error while opening the requested file");
+        return;
+    }
+
+    // Check for valid file type and create Content-Type response header
+    string contentHeader = parseFileType(file_name);
 
     close(client_fd);
     return;
