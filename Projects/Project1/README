@@ -15,7 +15,8 @@ with the client after a request is made. If the requested file is not found,
 or if a query is made to the base path ('/'), it returns a 404 error, otherwise
 it always returns a 200 status code. The server is able to log the IP of the 
 client, the entire client request and the file name requested. It also logs 
-the response headers.
+the response headers. The server also closes gracefully on ctrl-c (sigint)
+and closes the socket connection.
 
 Problems:
 1. Segmentation faults: I believe this only happens when the keep-alive 
