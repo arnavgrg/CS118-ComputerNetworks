@@ -32,9 +32,9 @@
 
 fd_set write_fd;
 
-#define PACK_SIZE     524
 #define MAX_FILE_SIZE 10*1000*1000
 
+int pack_size          = 524;
 int max_seq_number     = 25600;
 const int payload_size = 512;
 unsigned int seq_num   = 0;
@@ -195,19 +195,19 @@ int main(int argc, char* argv[]) {
 void convertToHostByteOrder(packet &p) {
     p.pack_header.seq_num = ntohl(p.pack_header.seq_num);
     p.pack_header.ack_num = ntohl(p.pack_header.ack_num);
-    p.pack_header.id      = ntohl(p.pack_header.id);
-    p.pack_header.flags   = ntohl(p.pack_header.flags);
+    p.pack_header.id      = ntohs(p.pack_header.id);
+    p.pack_header.flags   = ntohs(p.pack_header.flags);
 }
 
 // data receiving in stop and wait
 int readPacket(int socket_fd, packet &p, struct addrinfo *rp, uint32_t ack) {
-    memset(&p, 0, PACK_SIZE);
+    memset(&p, 0, pack_size);
     time_flag = 0;
     // start timer for 0.5s
     std::thread timer_thread(timer, 500);
 
     while (time_flag == 0) {
-        int recv_bytes = recvfrom(socket_fd, &p, PACK_SIZE, 0, rp->ai_addr, &rp->ai_addrlen);
+        int recv_bytes = recvfrom(socket_fd, &p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen);
         if (recv_bytes >= 0) {
             // convert packet to host byte order
             convertToHostByteOrder(p);

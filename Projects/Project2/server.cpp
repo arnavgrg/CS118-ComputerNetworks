@@ -23,9 +23,6 @@
 #define ACK_FIN 5
 #define ACK_SYN 6
 
-fd_set write_fd;
-fd_set read_fd;
-
 // connection timeout and packets
 //const unsigned int overall_timeout = 10;
 const int payload_size = 512;
@@ -211,11 +208,10 @@ int main(int argc, char* argv[]) {
 
                     /* update connection fields */
                     // Set flag to SYN ACK
-                    connections[i].pack.pack_header.flags = ACK_SYN;
+                    connections[i].pack.pack_header.flags = 6;
                     // New ack number is current seq number + 1
                     connections[i].pack.pack_header.ack_num = buffer.pack_header.seq_num + 1;
                     // Initialize random sequence number
-                    //TODO:
                     srand(time(NULL)+getpid());
                     int seqNum = rand() % max_seq_num;
                     connections[i].pack.pack_header.seq_num = seqNum;
@@ -281,7 +277,7 @@ int main(int argc, char* argv[]) {
                             connections[i].pack.pack_header.seq_num += 1;
                     }
                     // Set flag to ack
-                    connections[i].pack.pack_header.flags = ACK;
+                    connections[i].pack.pack_header.flags = 4;
                     
                     // Update buffer fields
                     buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);
@@ -308,7 +304,7 @@ int main(int argc, char* argv[]) {
                     else {}
                     
                     // Update connection flag
-                    connections[i].pack.pack_header.flags = ACK;
+                    connections[i].pack.pack_header.flags = 4;
                     
                     // Update buffer fields
                     buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);

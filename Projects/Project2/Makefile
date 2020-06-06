@@ -13,7 +13,7 @@ client: $(CLASSES)
 	$(CXX) -o $@ $^ $(FLAGS) $@.cpp
 
 clean:
-	rm -rf *.o *.dSYM server client *.tar.gz
+	rm -rf *.o *.dSYM *.file server client *.tar.gz
 
 dist: tarball
 tarball: clean
