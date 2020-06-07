@@ -1,0 +1,61 @@
+Name:  Arnav Garg
+Email: arnavgrg@ucla.edu
+UID:   304911796
+
+High-Level Design Overview:
+This program essentially has a client transmit a file of upto 10MB to the server by building a reliable
+data transfer service on top of UDP. The server creates a UDP socket and waits for datagrams from the client.
+At the beginning, the client sends a packet with no payload and a 12byte header with the SYN flag set. The 
+server parses the body and responds back with a SYN ACK, acknowledging that the connection is established. 
+The server then starts to send packets of size 524 bytes to the server, where the header is 12 bytes and 
+payload has a maximum size of 512 bytes. It transfers a file that is specified to the server by breaking 
+it into smaller packet sizes. The server responds back with acknowledgements for each packet it receives 
+from the client and writes the payload body to a file with the format <conn_id>.file, where conn_id is the 
+id of the unique connection made with the server. The server is actually capable of handling upto 20 
+different connections before it needs to be restarted. The data is sent via the Go-back-n protocol, which
+has a window size of 10 (5120 bytes). It transmits 10 packets at first (assuming the file size is > 5120
+bytes), and then increments the window by 1 after it receives an ACK from the first packet. This continues
+until the entire file is sent to the server. At the end, the server responds back with the remaining 
+acknowledgements (approximately 10 or 11 depending on how/when other acks were returned). Once the client is
+done transmitting the file, it sends a packet to the server with the FIN flag on, and the server responds back
+with an ACK followed by a FIN of its own. The client then waits for 2 seconds to send an ACK back to the 
+server, and closes its connection with the server.
+
+Packet header format:
+    seq_num:       4 bytes
+    ack_num:       4 bytes
+    connection_id: 2 bytes
+    flags:         2 bytes
+
+Flags:
+    0x0001: FIN
+    0x0002: SYN
+    0x0004: ACK
+    0x0005: FIN_ACK
+    0x0006: SYN_ACK
+
+Problems:
+1. Took me a really long time to actually send and receive data over a UDP connection. 
+2. I had a lot of trouble with htons and ntohs because in several places I forgot to differentiate between
+   the long and short byte order versions (required for different fields in my packet header), so I wasn't
+   receiving the correct flags. This took me a really long time to debug.
+3. Go-back-n: Even though this is conceptually very simple, I couldn't get it to stop sending packets at 
+   the correct time. Another issue I found was actually incrementing the sequence number correctly, because
+   I kept running into an issue where the first packet would get sent correctly but none of the other packets
+   would be sent. This took me a while to debug and eventually the compromise was to switch from nested while
+   loops to just a singular while loop and using a continue within the if statement.
+4. I also found it difficult to print to stdout correctly at times and didn't realize that htons and ntohs 
+   would give me different output (which actually makes a lot of sense). So I wasted a lot of time debugging
+   something so trivial.
+5. I did actually setup a struct specifically for packet loss (check pipeObj in client.cpp) that would keep
+   track of individual timers for each packet sent. However, this proved to be quite difficult to implement,
+   even for go-back-n. I couldn't figure out how to actually keep track of where exactly I was, and decided
+   to eventually use posstream since I could keep track of where in the file I last sent my data. However,
+   I ran out of time by this point and had to turn the project in.
+
+Resources:
+1. http://www.cplusplus.com/reference/vector/vector/erase/
+2. http://www.cplusplus.com/reference/istream/istream/tellg/ 
+3. https://en.cppreference.com/w/cpp/chrono/steady_clock
+4. https://www.web-workers.ch/index.php/2017/06/23/how-to-create-a-1gb-100mb-10mb-file-for-testing/
+5. https://www.ccs-labs.org/teaching/rn/animations/gbn_sr/ 

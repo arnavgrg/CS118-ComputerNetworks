@@ -331,7 +331,9 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
     int current = 0;
     int global_count = 0;
 
+    // when global count == num packets, all data has been transferred
     while (global_count != num_packets) {
+        // this if condition essentially works like a sliding packet
         if (current < 10) {
             // clear EOF bit
             ifs.clear();
@@ -345,13 +347,16 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
             sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
             // Display output
             printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
-            // update ack num
+            // update ack num by the amount of data read
             seq_num += ifs.gcount();
+            // incase seq_num overflows, use mod to make sure it stays within bounds
             seq_num %= max_seq_number;
+            // increment counters
             current += 1;
             global_count += 1;
             continue;
         }
+        // everytime an ack is received, decrement current by 1 so the window can slide by 1 and the next packet can be sent
         if (recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen) > 0){
             convertToHostByteOrder(receive_p);
             printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
