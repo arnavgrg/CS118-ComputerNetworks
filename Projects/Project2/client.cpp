@@ -338,26 +338,35 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
     // reset flag to 0
     time_flag = 0;
 
-    int i = 0;
-    while (i < num_packets) {
-        // clear EOF bit
-        ifs.clear();
-        // seek to next chunk
-        ifs.seekg(i*payload_size);
-        // read data into packet
-        ifs.read(send_p.data, payload_size);
-        // set flag to ACK
-        setHeader(send_p, seq_num, ack_num, id_num, 0);
-        // Send packet
-        sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
-        // Display output
-        printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
-        // update ack num
-        seq_num += ifs.gcount();
-        seq_num %= max_seq_number;
-        // increment i and set wait flag to true to receive an ack
-        i += 1;
-        int recvbytes = readPacket(socket_fd, receive_p, rp, seq_num+1);
+    int current = 0;
+    int global_count = 0;
+
+    while (global_count != num_packets) {
+        if (current < 10) {
+            // clear EOF bit
+            ifs.clear();
+            // seek to next chunk
+            ifs.seekg(current*payload_size);
+            // read data into packet
+            ifs.read(send_p.data, payload_size);
+            // set flag to ACK
+            setHeader(send_p, seq_num, ack_num, id_num, 0);
+            // Send packet
+            sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
+            // Display output
+            printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+            // update ack num
+            seq_num += ifs.gcount();
+            seq_num %= max_seq_number;
+            current += 1;
+            global_count += 1;
+            continue;
+        }
+        if (recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen) > 0){
+            convertToHostByteOrder(receive_p);
+            printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
+            current -= 1;
+        }
     }
 }
 
