@@ -94,13 +94,13 @@ void sig_handler(int s){
 // Print packet data to stdout
 void printPacketInfo(std::string msg, char f, uint32_t seq, uint32_t ack, uint16_t flg) {
     std::string flag = "";
-    if (f == 'S' || f == 'D') {
+    if (f == 'S' || f == 'U') {
         seq = ntohl(seq);
         ack = ntohl(ack);
         flg = ntohs(flg);
     }
     switch(flg) {
-        case 0:     flag=" ";       break;
+        case 0:     flag="";       break;
         case 1:     flag="FIN";     break;
         case 2:     flag="SYN";     break;
         case 4:     flag="ACK";     break;
@@ -112,8 +112,12 @@ void printPacketInfo(std::string msg, char f, uint32_t seq, uint32_t ack, uint16
     else if (msg=="SEND") {
         if (f == 'S')
             printf("SEND %u %u %s\n", seq, ack, flag.c_str());
-        else if (f == 'U')
-            printf("SEND %u %u %s DUP-ACK\n", seq, ack, flag.c_str());
+        else if (f == 'U'){
+            if (flag == "") 
+                printf("SEND %u %u DUP-ACK\n", seq, ack);
+            else
+                printf("SEND %u %u %s DUP-ACK\n", seq, ack, flag.c_str());
+        }
     } 
     else if (msg=="RESEND")
         printf("RESEND %u %u %s\n", seq, ack, flag.c_str());
@@ -296,7 +300,7 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
     unsigned int receive_ack = 0;
     unsigned int last_seq    = 0;
     int file_len             = 0;
-    int first_ack            = 4;
+    int temp_ack             = 4;
 
     std::chrono::steady_clock::time_point msg_timer;
 
@@ -355,9 +359,9 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
                 showError("error while reading from file\n");
             }
 
-            setHeader(send_p, seq_num, ack_num, id_num, first_ack);
+            setHeader(send_p, seq_num, ack_num, id_num, temp_ack);
             ack_num = 0;
-            first_ack = 0;
+            temp_ack = 0;
 
             pipeObj send_obj;
             send_obj.seq = seq_num;
@@ -416,10 +420,11 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
 // Send final messages before closing connection
 void end_connection(int socket_fd, struct addrinfo* rp) {
     // create timers
-    std::chrono::steady_clock::time_point start;
-    std::chrono::steady_clock::time_point send;
+    std::chrono::steady_clock::time_point start, send;
     
+    // flag for when first FIN is received
     int fin_client = 0;
+    // set ack number to 0 for FIN message
     ack_num = 0;
 
     // create data packets
@@ -427,7 +432,8 @@ void end_connection(int socket_fd, struct addrinfo* rp) {
     memset(&send_p, 0, sizeof(send_p));
     memset(&receive_p, 0, sizeof(receive_p));
 
-    setHeader(send_p, seq_num, ack_num, id_num, 1);
+    // set header with FIN flag and ack_num set to 0
+    setHeader(send_p, seq_num, ack_num, id_num, FIN);
 
     // start both timers
     start = std::chrono::steady_clock::now(); //10 sec response from server
@@ -462,6 +468,7 @@ void end_connection(int socket_fd, struct addrinfo* rp) {
             start = std::chrono::steady_clock::now();
 
             // check if we received correct ack or fin flag 
+            // drop any non-FIN packet
             if (receive_p.pack_header.ack_num == seq_num + 1 || receive_p.pack_header.flags == FIN) {
                 if (receive_p.pack_header.flags == ACK_FIN || receive_p.pack_header.flags == FIN) {
                     // fin was detected to set flag to 1
@@ -489,19 +496,16 @@ void end_connection(int socket_fd, struct addrinfo* rp) {
                         convertToHostByteOrder(receive_p);
                         printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
 
+                        // drop packet since it was not expected
+                        // while waiting to close, if we receive any FIN packet from server, respond back with an ACK
                         if (receive_p.pack_header.flags == FIN) {
                             ack_num = receive_p.pack_header.seq_num + 1;
                             setHeader(send_p, seq_num, ack_num, id_num, ACK);
                             sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
                             printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
-                        } else {
-                            // drop packet since it was not expected
                         }
                     }
                 }
-            }
-            else {
-                //drop any non FIN packet
             }
         }
     }

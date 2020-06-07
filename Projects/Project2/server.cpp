@@ -17,9 +17,9 @@
 #include <map>
 #include <ctime>
 
-#define FIN 1
-#define SYN 2
-#define ACK 4
+#define FIN     1
+#define SYN     2
+#define ACK     4
 #define ACK_FIN 5
 #define ACK_SYN 6
 
@@ -112,6 +112,22 @@ void printPacketInfo(std::string msg, packet p) {
         std::cout << msg << " " << seq_num << std::endl;
 }
 
+// Helper method to update buffer fields
+void updateBuffer(packet &buffer, int i) {
+    buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);
+    buffer.pack_header.ack_num = htonl(connections[i].pack.pack_header.ack_num);
+    buffer.pack_header.id      = htons(connections[i].pack.pack_header.id);
+    buffer.pack_header.flags   = htons(connections[i].pack.pack_header.flags);
+}
+
+// set fields to host byte order
+void changeByteOrder(packet &buffer) {
+    buffer.pack_header.seq_num = ntohl(buffer.pack_header.seq_num);
+    buffer.pack_header.ack_num = ntohl(buffer.pack_header.ack_num);
+    buffer.pack_header.id      = ntohs(buffer.pack_header.id);
+    buffer.pack_header.flags   = ntohs(buffer.pack_header.flags);
+}
+
 int main(int argc, char* argv[]) {
     // Setup signal handler
     if (signal(SIGINT, sighandler) == SIG_ERR) 
@@ -190,10 +206,7 @@ int main(int argc, char* argv[]) {
             showError("recvfrom returned -1");
         
         // Convert to host byte order
-        buffer.pack_header.seq_num = ntohl(buffer.pack_header.seq_num);
-        buffer.pack_header.ack_num = ntohl(buffer.pack_header.ack_num);
-        buffer.pack_header.id      = ntohs(buffer.pack_header.id);
-        buffer.pack_header.flags   = ntohs(buffer.pack_header.flags);
+        changeByteOrder(buffer);
         
         // Log received packet to stdout
         printPacketInfo("RECV", buffer);
@@ -223,10 +236,7 @@ int main(int argc, char* argv[]) {
                     connections[i].file.open(file_path);
                     
                     /* update buffer fields */
-                    buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);
-                    buffer.pack_header.ack_num = htonl(connections[i].pack.pack_header.ack_num);
-                    buffer.pack_header.id      = htons(connections[i].pack.pack_header.id);
-                    buffer.pack_header.flags   = htons(connections[i].pack.pack_header.flags);
+                    updateBuffer(buffer, i);
 
                     // send message to client //
                     sendto(socket_fd, &buffer, sizeof(connections[i].pack), 0, &connections[i].src_addr, connections[i].addr_len);
@@ -280,10 +290,7 @@ int main(int argc, char* argv[]) {
                     connections[i].pack.pack_header.flags = 4;
                     
                     // Update buffer fields
-                    buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);
-                    buffer.pack_header.ack_num = htonl(connections[i].pack.pack_header.ack_num);
-                    buffer.pack_header.id      = htons(connections[i].pack.pack_header.id);
-                    buffer.pack_header.flags   = htons(connections[i].pack.pack_header.flags);
+                    updateBuffer(buffer, i);
 
                     // send message to client
                     sendto(socket_fd, &buffer, sizeof(connections[i].pack), 0, &connections[i].src_addr, connections[i].addr_len);
@@ -307,10 +314,7 @@ int main(int argc, char* argv[]) {
                     connections[i].pack.pack_header.flags = 4;
                     
                     // Update buffer fields
-                    buffer.pack_header.seq_num = htonl(connections[i].pack.pack_header.seq_num);
-                    buffer.pack_header.ack_num = htonl(connections[i].pack.pack_header.ack_num);
-                    buffer.pack_header.id      = htons(connections[i].pack.pack_header.id);
-                    buffer.pack_header.flags   = htons(connections[i].pack.pack_header.flags);
+                    updateBuffer(buffer, i);
                     
                     // send ACK message to client
                     sendto(socket_fd, &buffer, sizeof(connections[i].pack), 0, &connections[i].src_addr, connections[i].addr_len);
@@ -328,17 +332,13 @@ int main(int argc, char* argv[]) {
                     sendto(socket_fd, &buffer, sizeof(connections[i].pack), 0, &connections[i].src_addr, connections[i].addr_len);
                     connections[i].isFin = 1;
 
-                    buffer.pack_header.seq_num = ntohl(buffer.pack_header.seq_num);
-                    buffer.pack_header.ack_num = ntohl(buffer.pack_header.ack_num);
-                    buffer.pack_header.id      = ntohs(buffer.pack_header.id);
-                    buffer.pack_header.flags   = ntohs(buffer.pack_header.flags);
+                    // convert back to host byte order so we can print it
+                    changeByteOrder(buffer);
 
                     printPacketInfo("SEND", buffer);
                     break;
                 }
             }
         }
-
     }
-
 }
