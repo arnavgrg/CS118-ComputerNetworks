@@ -25,9 +25,9 @@
 
 // connection timeout and packets
 //const unsigned int overall_timeout = 10;
-const int payload_size = 512;
+const int payload_size        = 512;
 const int allowed_connections = 20;
-const int max_seq_num = 25600;
+const int max_seq_num         = 25600;
 
 // timeval structs for timers
 struct timeval tv;
@@ -120,7 +120,7 @@ void updateBuffer(packet &buffer, int i) {
     buffer.pack_header.flags   = htons(connections[i].pack.pack_header.flags);
 }
 
-// set fields to host byte order
+// Set fields to host byte order
 void changeByteOrder(packet &buffer) {
     buffer.pack_header.seq_num = ntohl(buffer.pack_header.seq_num);
     buffer.pack_header.ack_num = ntohl(buffer.pack_header.ack_num);

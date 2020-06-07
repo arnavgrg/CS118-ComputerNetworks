@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <cmath>
 
 #define EXIT_FAILURE 1
 #define EXIT_SUCCESS 0
@@ -40,6 +41,7 @@ unsigned int seq_num   = 0;
 unsigned int ack_num   = 0;
 unsigned int id_num    = 0;
 int time_flag          = 0;
+int window_size        = 10;
 
 // Header struct for each RDT packet
 struct header {
@@ -202,7 +204,7 @@ int main(int argc, char* argv[]) {
     // Perform TCP 3-way handshake
     handshake(socket_fd, rp);
     // Transfer file data
-    //data_transfer(socket_fd, rp, file_name);
+    data_transfer(socket_fd, rp, file_name);
     // Close connection
     end_connection(socket_fd, rp);
 }
@@ -297,21 +299,22 @@ void handshake(int socket_fd, struct addrinfo* rp) {
 
 // Data transfer using sliding window
 void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
+    // Keep track of last received acknowledge and seq number
     unsigned int receive_ack = 0;
     unsigned int last_seq    = 0;
-    int file_len             = 0;
     int temp_ack             = 4;
 
     std::chrono::steady_clock::time_point msg_timer;
 
     // create data packets
     packet send_p, receive_p;
-    memset(&send_p, 0, sizeof(send_p));
+    memset(&send_p,    0, sizeof(send_p));
     memset(&receive_p, 0, sizeof(receive_p));
 
     // open file in binary mode and set output position to the end of the file
     std::ifstream ifs(file_name.c_str(), std::ios::binary);
-    
+    int file_len = 0;
+
     // error check
     if (ifs.good()) {
         // seek to end of file
@@ -329,92 +332,122 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
         showError("error while opening file\n");
     }
 
+    // total number of packets that need to be sent
+    int num_packets = ceil((double)file_len/payload_size);
+
     // reset flag to 0
     time_flag = 0;
 
-    while (true) {
-        // set time to now
-        std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
-
-        if(!sendPipe.empty()) {
-            // checks if first item in the queue was sent more than 0.5s ago
-            if ((std::chrono::duration_cast<std::chrono::milliseconds>(t - sendPipe.front().time_sent).count() > 500)) {
-                // clear EOF bit
-                ifs.clear();
-                // seek to next part of file
-                ifs.seekg(sendPipe.front().current_pos);
-
-                last_seq = seq_num;
-                seq_num = sendPipe.front().seq;
-                sendPipe.erase(sendPipe.begin());
-            }
-        }
-
-        if (!ifs.eof()) {
-            std::streampos pos = ifs.tellg();
-            ifs.read(send_p.data, 512);
-
-            if (ifs.fail() && !ifs.eof()){
-                close(socket_fd);
-                showError("error while reading from file\n");
-            }
-
-            setHeader(send_p, seq_num, ack_num, id_num, temp_ack);
-            ack_num = 0;
-            temp_ack = 0;
-
-            pipeObj send_obj;
-            send_obj.seq = seq_num;
-
-            seq_num += ifs.gcount();
-            seq_num %= (max_seq_number+1);
-
-            send_obj.ack = seq_num;
-            send_obj.current_pos = pos;
-            send_obj.time_sent = std::chrono::steady_clock::now();
-            sendPipe.push_back(send_obj);
-
-            if (time_flag == 0) {
-                msg_timer = send_obj.time_sent;
-                time_flag = 1;
-            }
-
-            if (ntohl(last_seq) >= ntohl(seq_num)){
-                printPacketInfo("SEND", 'U', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
-                last_seq = seq_num;
-            }
-            else
-                printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
-
+    int wait_flag = false;
+    int i = 0;
+    while (i < num_packets) {
+        if (wait_flag == false) {
+            // clear EOF bit
+            ifs.clear();
+            // seek to next chunk
+            ifs.seekg(i*payload_size);
+            // read data into packet
+            ifs.read(send_p.data, payload_size);
+            // set flag to ACK
+            setHeader(send_p, seq_num, ack_num, id_num, 0);
+            // Send packet
             sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
-        }
-
-        // check for ACKs from server
-        int recvbytes = recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen);
-        if (recvbytes > 0) {
-            convertToHostByteOrder(receive_p);
-            receive_ack = receive_p.pack_header.ack_num;
-
-            msg_timer = std::chrono::steady_clock::now();
-
-            for (std::vector<int>::size_type i = 0; i < sendPipe.size(); i++){
-                if (sendPipe[i].ack == receive_p.pack_header.ack_num) {
-                    printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
-                    break;
-                }
-            }
-        }
-        else {
-            if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - msg_timer).count() >= 10) {
-                close(socket_fd);
-                showError("server failed to respond within 10s\n");
-            }
-        }
-
-        if (ifs.tellg() == -1 && sendPipe.empty()) {
-            break;
+            // Display output
+            printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+            // update ack num
+            seq_num += ifs.gcount();
+            seq_num %= max_seq_number;
+            // increment i and set wait flag to true to receive an ack
+            i += 1;
+            wait_flag = false;
         }
     }
+
+    // while (true) {
+    //     // set time to now
+    //     std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+
+    //     if(!sendPipe.empty()) {
+    //         // checks if first item in the queue was sent more than 0.5s ago
+    //         if ((std::chrono::duration_cast<std::chrono::milliseconds>(t - sendPipe.front().time_sent).count() > 500)) {
+    //             // clear EOF bit
+    //             ifs.clear();
+    //             // seek to next part of file
+    //             ifs.seekg(sendPipe.front().current_pos);
+
+    //             last_seq = seq_num;
+    //             seq_num = sendPipe.front().seq;
+    //             sendPipe.erase(sendPipe.begin());
+    //         }
+    //     }
+
+    //     if (!ifs.eof()) {
+    //         std::streampos pos = ifs.tellg();
+    //         ifs.read(send_p.data, 512);
+
+    //         if (ifs.fail() && !ifs.eof()){
+    //             close(socket_fd);
+    //             showError("error while reading from file\n");
+    //         }
+
+    //         setHeader(send_p, seq_num, ack_num, id_num, temp_ack);
+    //         ack_num = 0;
+    //         temp_ack = 0;
+
+    //         pipeObj send_obj;
+    //         send_obj.seq = seq_num;
+
+    //         seq_num += ifs.gcount();
+    //         seq_num %= (max_seq_number+1);
+
+    //         send_obj.ack = seq_num;
+    //         send_obj.current_pos = pos;
+    //         send_obj.time_sent = std::chrono::steady_clock::now();
+    //         sendPipe.push_back(send_obj);
+
+    //         if (time_flag == 0) {
+    //             msg_timer = send_obj.time_sent;
+    //             time_flag = 1;
+    //         }
+
+    //         if (ntohl(last_seq) >= ntohl(seq_num)){
+    //             printPacketInfo("SEND", 'U', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+    //             last_seq = seq_num;
+    //         }
+    //         else
+    //             printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+
+    //         sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
+    //     }
+
+    //     // check for ACKs from server
+    //     int recvbytes = recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen);
+    //     if (recvbytes > 0) {
+    //         convertToHostByteOrder(receive_p);
+    //         receive_ack = receive_p.pack_header.ack_num;
+    //         // reset timer since server responded back within 10 seconds
+    //         msg_timer = std::chrono::steady_clock::now();
+    //         // iterate through pipe objects and log RECV messages for whichever ones have been acknowledged by the server
+    //         for (std::vector<int>::size_type i = 0; i < sendPipe.size(); i++){
+    //             if (sendPipe[i].ack == receive_p.pack_header.ack_num) {
+    //                 printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //     else {
+    //         // if server has not responded back within 10 seconds, close connection with server and exit
+    //         if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - msg_timer).count() >= 10) {
+    //             close(socket_fd);
+    //             showError("server failed to respond within 10s\n");
+    //         }
+    //     }
+
+    //     // done transmitting all data, so break from while loop
+    //     if (ifs.tellg() == -1 && sendPipe.empty()) {
+    //         break;
+    //     }
+    // }
 }
 
 // Send final messages before closing connection
