@@ -327,6 +327,12 @@ int main(int argc, char* argv[]) {
                     // send ACK message to client
                     sendto(socket_fd, &buffer, sizeof(connections[i].pack), 0, &connections[i].src_addr, connections[i].addr_len);
                     connections[i].isFin = 1;
+
+                    buffer.pack_header.seq_num = ntohl(buffer.pack_header.seq_num);
+                    buffer.pack_header.ack_num = ntohl(buffer.pack_header.ack_num);
+                    buffer.pack_header.id      = ntohs(buffer.pack_header.id);
+                    buffer.pack_header.flags   = ntohs(buffer.pack_header.flags);
+
                     printPacketInfo("SEND", buffer);
                     break;
                 }

@@ -30,9 +30,8 @@
 #define ACK_FIN 5
 #define ACK_SYN 6
 
-fd_set write_fd;
-
-#define MAX_FILE_SIZE 10*1000*1000
+// 10 MB
+#define MAX_FILE_SIZE 10*1024*1024
 
 int pack_size          = 524;
 int max_seq_number     = 25600;
@@ -49,14 +48,27 @@ struct header {
     uint16_t id;
     uint16_t flags;
 };
-typedef struct header header;
 
 // Packet struct 
 struct packet {
     header pack_header;
     char data[payload_size];
 };
+
+// Object in pipelining scheme
+struct pipeObj {    
+    std::chrono::steady_clock::time_point time_sent;
+    unsigned int seq;
+    unsigned int ack;
+    std::streampos current_pos;
+};
+
+typedef struct header header;
 typedef struct packet packet;
+typedef struct pipeObj pipeObj;
+
+// vector for pipelining
+std::vector<pipeObj> sendPipe;
 
 void setHeader(packet &p, uint32_t seq, uint32_t ack, uint16_t id, uint16_t flg) {
     p.pack_header.seq_num = htonl(seq);
@@ -186,7 +198,7 @@ int main(int argc, char* argv[]) {
     // Perform TCP 3-way handshake
     handshake(socket_fd, rp);
     // Transfer file data
-    data_transfer(socket_fd, rp, file_name);
+    //data_transfer(socket_fd, rp, file_name);
     // Close connection
     end_connection(socket_fd, rp);
 }
@@ -221,9 +233,8 @@ int readPacket(int socket_fd, packet &p, struct addrinfo *rp, uint32_t ack) {
                 return recv_bytes;
             } 
             // ack received but not the expected on
-            else {
+            else
                 continue;
-            }
         }
     }
 
@@ -238,8 +249,7 @@ void handshake(int socket_fd, struct addrinfo* rp) {
     std::chrono::steady_clock::time_point start_time;
 
     // create data packets
-    packet send_p;
-    packet receive_p;
+    packet send_p, receive_p;
     memset(&send_p, 0, sizeof(send_p));
     memset(&receive_p, 0, sizeof(receive_p));
 
@@ -258,7 +268,7 @@ void handshake(int socket_fd, struct addrinfo* rp) {
             showError("server has not responded for 10s\n");
         }
         // Send SYN packet
-        sendto(socket_fd, &send_p, 524, 0, rp->ai_addr, rp->ai_addrlen);
+        sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
         printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
         // Parse any data packets received
         int recv_bytes = readPacket(socket_fd, receive_p, rp, seq_num+1);
@@ -281,12 +291,218 @@ void handshake(int socket_fd, struct addrinfo* rp) {
 
 }
 
-// Send final messages before closing connection
-void end_connection(int socket_fd, struct addrinfo* rp){
-
-}
-
 // Data transfer using sliding window
 void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
+    unsigned int receive_ack = 0;
+    unsigned int last_seq    = 0;
+    int file_len             = 0;
+    int first_ack            = 4;
 
+    std::chrono::steady_clock::time_point msg_timer;
+
+    // create data packets
+    packet send_p, receive_p;
+    memset(&send_p, 0, sizeof(send_p));
+    memset(&receive_p, 0, sizeof(receive_p));
+
+    // open file in binary mode and set output position to the end of the file
+    std::ifstream ifs(file_name.c_str(), std::ios::binary);
+    
+    // error check
+    if (ifs.good()) {
+        // seek to end of file
+        ifs.seekg(0, ifs.end);
+        // read length
+        file_len = ifs.tellg();
+        // if length > 10MB, close client and report error
+        if (file_len > MAX_FILE_SIZE) {
+            close(socket_fd);
+            showError("transfer file too large\n");
+        }
+        // seek back to the beginning of the file
+        ifs.seekg(0, ifs.beg);
+    } else {
+        showError("error while opening file\n");
+    }
+
+    // reset flag to 0
+    time_flag = 0;
+
+    while (true) {
+        // set time to now
+        std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+
+        if(!sendPipe.empty()) {
+            // checks if first item in the queue was sent more than 0.5s ago
+            if ((std::chrono::duration_cast<std::chrono::milliseconds>(t - sendPipe.front().time_sent).count() > 500)) {
+                // clear EOF bit
+                ifs.clear();
+                // seek to next part of file
+                ifs.seekg(sendPipe.front().current_pos);
+
+                last_seq = seq_num;
+                seq_num = sendPipe.front().seq;
+                sendPipe.erase(sendPipe.begin());
+            }
+        }
+
+        if (!ifs.eof()) {
+            std::streampos pos = ifs.tellg();
+            ifs.read(send_p.data, 512);
+
+            if (ifs.fail() && !ifs.eof()){
+                close(socket_fd);
+                showError("error while reading from file\n");
+            }
+
+            setHeader(send_p, seq_num, ack_num, id_num, first_ack);
+            ack_num = 0;
+            first_ack = 0;
+
+            pipeObj send_obj;
+            send_obj.seq = seq_num;
+
+            seq_num += ifs.gcount();
+            seq_num %= (max_seq_number+1);
+
+            send_obj.ack = seq_num;
+            send_obj.current_pos = pos;
+            send_obj.time_sent = std::chrono::steady_clock::now();
+            sendPipe.push_back(send_obj);
+
+            if (time_flag == 0) {
+                msg_timer = send_obj.time_sent;
+                time_flag = 1;
+            }
+
+            if (ntohl(last_seq) >= ntohl(seq_num)){
+                printPacketInfo("SEND", 'U', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+                last_seq = seq_num;
+            }
+            else
+                printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+
+            sendto(socket_fd, &send_p, ifs.gcount()+12, 0, rp->ai_addr, rp->ai_addrlen);
+        }
+
+        // check for ACKs from server
+        int recvbytes = recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen);
+        if (recvbytes > 0) {
+            convertToHostByteOrder(receive_p);
+            receive_ack = receive_p.pack_header.ack_num;
+
+            msg_timer = std::chrono::steady_clock::now();
+
+            for (std::vector<int>::size_type i = 0; i < sendPipe.size(); i++){
+                if (sendPipe[i].ack == receive_p.pack_header.ack_num) {
+                    printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
+                    break;
+                }
+            }
+        }
+        else {
+            if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - msg_timer).count() >= 10) {
+                close(socket_fd);
+                showError("server failed to respond within 10s\n");
+            }
+        }
+
+        if (ifs.tellg() == -1 && sendPipe.empty()) {
+            break;
+        }
+    }
+}
+
+// Send final messages before closing connection
+void end_connection(int socket_fd, struct addrinfo* rp) {
+    // create timers
+    std::chrono::steady_clock::time_point start;
+    std::chrono::steady_clock::time_point send;
+    
+    int fin_client = 0;
+    ack_num = 0;
+
+    // create data packets
+    packet send_p, receive_p;
+    memset(&send_p, 0, sizeof(send_p));
+    memset(&receive_p, 0, sizeof(receive_p));
+
+    setHeader(send_p, seq_num, ack_num, id_num, 1);
+
+    // start both timers
+    start = std::chrono::steady_clock::now(); //10 sec response from server
+    send  = std::chrono::steady_clock::now(); //0.5 sec response from server
+
+    // Send FIN packet to server
+    sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
+    printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+
+    // wait for FIN/ACK
+    while (true) {
+        // 10 sec timeout
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start).count() >= 10){
+            close(socket_fd);
+            showError("FIN ACK not received from server\n");
+        }
+        // check 0.5 sec timeout and retransmit FIN packet again incase it was lost
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-send).count() >= 0.5){
+            sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
+            printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+            // reset sent packet timer
+            send = std::chrono::steady_clock::now();
+        }
+        // check for datagram from server
+        int recvbytes = recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen); 
+        if (recvbytes > 0) {
+            // convert to host byte order and print pack to stdout
+            convertToHostByteOrder(receive_p);
+            printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
+
+            // reset overall timer
+            start = std::chrono::steady_clock::now();
+
+            // check if we received correct ack or fin flag 
+            if (receive_p.pack_header.ack_num == seq_num + 1 || receive_p.pack_header.flags == FIN) {
+                if (receive_p.pack_header.flags == ACK_FIN || receive_p.pack_header.flags == FIN) {
+                    // fin was detected to set flag to 1
+                    fin_client = 1;
+                    // update ack number to packet's seq number + 1
+                    ack_num = receive_p.pack_header.seq_num + 1;
+                    setHeader(send_p, seq_num, ack_num, id_num, ACK);
+                    // send ACK to server acknowledging FIN
+                    sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
+                    printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+                    // update timer
+                    start = std::chrono::steady_clock::now();
+                }
+                // wait 2 seconds to close connection and terminate
+                // can receive ACK/FIN/FIN ACK
+                while (fin_client) {
+                    // if timeout exit this function
+                    if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start).count() >= 2) {
+                        // close connection with client and exit
+                        close(socket_fd);
+                        return;
+                    }
+                    // check if we receive any other packet from the server before closing
+                    if (recvfrom(socket_fd, &receive_p, pack_size, 0, rp->ai_addr, &rp->ai_addrlen) > 0){
+                        convertToHostByteOrder(receive_p);
+                        printPacketInfo("RECV", ' ', receive_p.pack_header.seq_num, receive_p.pack_header.ack_num, receive_p.pack_header.flags);
+
+                        if (receive_p.pack_header.flags == FIN) {
+                            ack_num = receive_p.pack_header.seq_num + 1;
+                            setHeader(send_p, seq_num, ack_num, id_num, ACK);
+                            sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
+                            printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
+                        } else {
+                            // drop packet since it was not expected
+                        }
+                    }
+                }
+            }
+            else {
+                //drop any non FIN packet
+            }
+        }
+    }
 }
