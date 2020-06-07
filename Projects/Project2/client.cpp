@@ -299,13 +299,6 @@ void handshake(int socket_fd, struct addrinfo* rp) {
 
 // Data transfer using sliding window
 void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
-    // Keep track of last received acknowledge and seq number
-    unsigned int receive_ack = 0;
-    unsigned int last_seq    = 0;
-    int temp_ack             = 4;
-
-    std::chrono::steady_clock::time_point msg_timer;
-
     // create data packets
     packet send_p, receive_p;
     memset(&send_p,    0, sizeof(send_p));
@@ -335,9 +328,6 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
     // total number of packets that need to be sent
     int num_packets = ceil((double)file_len/payload_size);
 
-    // reset flag to 0
-    time_flag = 0;
-
     int current = 0;
     int global_count = 0;
 
@@ -346,7 +336,7 @@ void data_transfer(int socket_fd, struct addrinfo* rp, std::string file_name) {
             // clear EOF bit
             ifs.clear();
             // seek to next chunk
-            ifs.seekg(current*payload_size);
+            ifs.seekg(global_count*payload_size);
             // read data into packet
             ifs.read(send_p.data, payload_size);
             // set flag to ACK
