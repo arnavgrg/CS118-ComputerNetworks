@@ -102,7 +102,7 @@ void printPacketInfo(std::string msg, char f, uint32_t seq, uint32_t ack, uint16
         flg = ntohs(flg);
     }
     switch(flg) {
-        case 0:     flag="";       break;
+        case 0:     flag="";        break;
         case 1:     flag="FIN";     break;
         case 2:     flag="SYN";     break;
         case 4:     flag="ACK";     break;
