@@ -423,7 +423,7 @@ void end_connection(int socket_fd, struct addrinfo* rp) {
                     fin_client = 1;
                     // update ack number to packet's seq number + 1
                     ack_num = receive_p.pack_header.seq_num + 1;
-                    setHeader(send_p, seq_num, ack_num, id_num, ACK);
+                    setHeader(send_p, seq_num+1, ack_num, id_num, ACK);
                     // send ACK to server acknowledging FIN
                     sendto(socket_fd, &send_p, pack_size, 0, rp->ai_addr, rp->ai_addrlen);
                     printPacketInfo("SEND", 'S', send_p.pack_header.seq_num, send_p.pack_header.ack_num, send_p.pack_header.flags);
